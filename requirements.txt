@@ -1,0 +1,18 @@
+# This file may be used to create an environment using:
+# $ conda create --name gcn --file requirements.txt --channel conda-forge --channel bioconda --channel pytorch
+jupyterlab
+scikit-learn
+numpy
+pandas
+matplotlib
+scipy
+pytorch
+torchvision
+msprime
+stdpopsim
+tskit
+pytorch-lightning
+torch-scatter
+torch-sparse
+torch-geometric
+networkx

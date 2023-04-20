@@ -16,3 +16,4 @@ torch-scatter
 torch-sparse
 torch-geometric
 networkx
+ipywidgets

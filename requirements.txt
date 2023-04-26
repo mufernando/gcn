@@ -1,5 +1,5 @@
 # This file may be used to create an environment using:
-# $ conda create --name gcn --file requirements.txt --channel conda-forge --channel bioconda --channel pytorch
+# $ conda create --name gcn --file requirements.txt --channel conda-forge --channel bioconda --channel pytorch --channel pyg
 jupyterlab
 scikit-learn
 numpy
@@ -12,8 +12,9 @@ msprime
 stdpopsim
 tskit
 pytorch-lightning
-torch-scatter
-torch-sparse
-torch-geometric
+pyg
+pytorch-scatter
+pytorch-sparse
 networkx
 ipywidgets
+gpustat

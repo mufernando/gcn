@@ -10,9 +10,10 @@ class MsprimeSimulation:
     seed: int
     num_reps: int
     sp_name: str
-    chrom: str
     model_name: str
     sims_root_path: str
+    chrom: str = None
+    length: int = None
     sample_size: int = 10
     n_threads: int = 6
     engine: str = "msprime"
@@ -22,8 +23,13 @@ class MsprimeSimulation:
         rng = np.random.default_rng(self.seed)
         self.seed_array = rng.integers(1, 2**31, self.num_reps)
         # Path parameters
+        if self.chrom is None:
+            contig = self.length
+        else:
+            assert self.chrom is not None
+            contig = self.chrom
         self.sims_path = (
-            f"{self.sims_root_path}{self.sp_name}/{self.chrom}/{self.model_name}/"
+            f"{self.sims_root_path}{self.sp_name}/{contig}/{self.model_name}/"
         )
         os.makedirs(self.sims_path, exist_ok=True)  # ensuring that sims_path exists
         self.ts_paths = [
@@ -34,7 +40,9 @@ class MsprimeSimulation:
         self.species = stdpopsim.get_species(self.sp_name)
         self.model = self.species.get_demographic_model(self.model_name)
         self.contig = self.species.get_contig(
-            self.chrom, mutation_rate=self.model.mutation_rate
+            chromosome=self.chrom,
+            mutation_rate=self.model.mutation_rate,
+            length=self.length,
         )
         self.samples = {pop.name: self.sample_size for pop in self.model.populations}
         self.run()

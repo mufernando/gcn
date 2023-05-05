@@ -4,6 +4,8 @@ import tskit
 from tsgcn.util import convert_tseq
 import numpy as np
 import os
+from functools import partial
+import multiprocessing.pool as mp
 
 
 class TreeSequenceData(Data):
@@ -38,27 +40,11 @@ class TreeSequencesDataset(Dataset):
         pre_transform=None,
         pre_filter=None,
         seeds=None,
-        y_func=None,
         y_name=None,
     ):
-        self.seeds = seeds
         self.raw_root = raw_root
-        if y_func is None:
-            assert y_name is None
-
-            def _windowed_div_from_ts(ts, num_windows=1):
-                windows = np.linspace(0, ts.sequence_length, num_windows + 1)
-                div = ts.diversity(windows=windows, mode="branch") / ts.diversity(
-                    mode="branch"
-                )
-                return torch.FloatTensor(div)
-
-            self.y_func = _windowed_div_from_ts
-            self.y_name = "win-div"
-        else:
-            assert y_name is not None
-            self.y_func = y_func
-            self.y_name = y_name
+        self.seeds = seeds
+        self.y_name = y_name
         super().__init__(root, transform, pre_transform, pre_filter)
 
     @property
@@ -83,20 +69,6 @@ class TreeSequencesDataset(Dataset):
                 sequence_length=seq_len,
             )
             torch.save(data, os.path.join(self.processed_dir, f"tseq_{i}.pt"))
-        self.process_y()
-
-    def process_y(self, y_func=None, y_name=None, **kwargs):
-        if y_func is None:
-            assert y_name is None
-            y_func = self.y_func
-            y_name = self.y_name
-        else:
-            self.y_func = y_func
-            self.y_name = y_name
-        for raw_file_name, i in zip(self.raw_file_names, range(len(self.seeds))):
-            ts = tskit.load(raw_file_name)
-            y = y_func(ts, **kwargs)
-            torch.save(y, os.path.join(self.processed_dir, f"y_{y_name}_{i}.pt"))
 
     def len(self):
         return len(self.processed_file_names)
@@ -106,3 +78,33 @@ class TreeSequencesDataset(Dataset):
         y = torch.load(os.path.join(self.processed_dir, f"y_{self.y_name}_{idx}.pt"))
         data.y = y
         return data
+
+
+def windowed_div_from_ts(ts, num_windows=100):
+    windows = np.linspace(0, ts.sequence_length, num_windows + 1)
+    div = ts.diversity(windows=windows, mode="branch") / ts.diversity(mode="branch")
+    return torch.FloatTensor(div)
+
+
+def _compute_y(i, dt, y_func, y_name, **kwargs):
+    seed = dt.seeds[i]
+    raw_file_name = f"{dt.raw_root}sim_{seed}.trees"
+    y_fname = os.path.join(dt.processed_dir, f"y_{y_name}_{i}.pt")
+    if not os.path.exists(y_fname):
+        ts = tskit.load(raw_file_name)
+        y = y_func(ts, **kwargs)
+        torch.save(y, y_fname)
+    return y_fname
+
+
+def compute_ys(dt, y_func, y_name, n_workers=6, **kwargs):
+    compute = partial(
+        _compute_y,
+        dt=dt,
+        y_func=y_func,
+        y_name=y_name,
+        **kwargs,
+    )
+    with mp.ThreadPool(n_workers) as pool:
+        ys = pool.map(compute, range(len(dt.seeds)))
+    assert len(list(ys)) == len(dt.seeds)

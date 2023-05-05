@@ -23,7 +23,8 @@ class BiGCNEncoder(torch.nn.Module):
         self.conv_f2 = GCNConv(self.out_features * 2, self.out_features)
         self.conv_b1 = GCNConv(self.in_features, self.out_features * 2)
         self.conv_b2 = GCNConv(self.out_features * 2, self.out_features)
-        self.batch_norm = BatchNorm1d(self.out_features * 2, momentum=0.3)
+        self.batch_norm_f = BatchNorm1d(self.out_features, momentum=0.3)
+        self.batch_norm_b = BatchNorm1d(self.out_features, momentum=0.3)
         self.lin = Linear(self.out_features * 2, self.out_features)
 
     def forward(self, data):
@@ -38,6 +39,7 @@ class BiGCNEncoder(torch.nn.Module):
             subgraph_edge = data.get_subgraph(left, right)
             x_f = self.conv_f1(x_f, subgraph_edge)
             x_f = self.conv_f2(x_f, subgraph_edge)
+            x_f = self.batch_norm_f(x_f)
         for i in range(len(breaks) - 1, 0, -1):
             left = breaks[i - 1]
             right = breaks[i]
@@ -45,9 +47,10 @@ class BiGCNEncoder(torch.nn.Module):
             subgraph_edge = data.get_subgraph(left, right)
             x_b = self.conv_b1(x_b, subgraph_edge)
             x_b = self.conv_b2(x_b, subgraph_edge)
+            x_b = self.batch_norm_b(x_b)
+
         x = torch.concat((x_f, x_b), 1)
         # print(x_f.shape, x_b.shape)
-        x = self.batch_norm(x)
         x = self.lin(x)
         return x
 

@@ -10,48 +10,49 @@ class BiGCNEncoder(torch.nn.Module):
     Node embeddings are updated by a GCN layer applied to edges that overlap with a window at a time, going both forwards and backwards.
     Forward and backward embeddings are summed to get the final embedding.
     TODO:
-        - add a way to specify sequence breaks
-        - remove manual seed
     """
 
-    def __init__(self, in_features, out_features=4, seed=1332339):
+    def __init__(self, breaks, device, in_features, out_features=4, seed=1332339):
         super(BiGCNEncoder, self).__init__()
+        self.breaks = breaks
+        self.device = device
         self.in_features = in_features
         self.out_features = out_features
-        # Layers to do the Graph convolutions (return vector of node embeddings with num_hidden features)
-        self.conv_f1 = GCNConv(self.in_features, self.out_features * 2)
-        self.conv_f2 = GCNConv(self.out_features * 2, self.out_features)
-        self.conv_b1 = GCNConv(self.in_features, self.out_features * 2)
-        self.conv_b2 = GCNConv(self.out_features * 2, self.out_features)
-        self.batch_norm_f = BatchNorm1d(self.out_features, momentum=0.3)
-        self.batch_norm_b = BatchNorm1d(self.out_features, momentum=0.3)
-        self.lin = Linear(self.out_features * 2, self.out_features)
+        # Blowing up the input features dimension to self.out_features
+        self.lin1 = Linear(self.in_features, self.out_features)
+        # Convolution layers for forward and backward passes
+        # self.conv = GCNConv(self.in_features, self.out_features)
+        self.conv_f = GCNConv(self.out_features, self.out_features)
+        self.conv_b = GCNConv(self.out_features, self.out_features)
+        # self.batch_norm = BatchNorm1d(self.out_features, momentum=0.1)
+        # self.batch_norm_f = BatchNorm1d(self.out_features, momentum=0.1)
+        # self.batch_norm_b = BatchNorm1d(self.out_features, momentum=0.1)
+        # Linear layer to combine the forward and backward embeddings
+        self.lin2 = Linear(self.out_features * 2, self.out_features)
 
     def forward(self, data):
-        breaks = [0, data.sequence_length]
+        # x_a = data.x.clone()
         x_f = data.x.clone()
         x_b = data.x.clone()
-        # print(x_f.shape, x_b.shape)
-        for i in range(len(breaks) - 1):
-            left = breaks[i]
-            right = breaks[i + 1]
-            # print(left,right)
+        x_f = self.lin1(x_f)
+        x_b = self.lin1(x_b)
+        for i in range(len(self.breaks) - 1):
+            left = self.breaks[i]
+            right = self.breaks[i + 1]
             subgraph_edge = data.get_subgraph(left, right)
-            x_f = self.conv_f1(x_f, subgraph_edge)
-            x_f = self.conv_f2(x_f, subgraph_edge)
-            x_f = self.batch_norm_f(x_f)
-        for i in range(len(breaks) - 1, 0, -1):
-            left = breaks[i - 1]
-            right = breaks[i]
+            x_f = self.conv_f(x_f, subgraph_edge)
+        for i in range(len(self.breaks) - 1, 0, -1):
+            left = self.breaks[i - 1]
+            right = self.breaks[i]
             # print(left, right)
             subgraph_edge = data.get_subgraph(left, right)
-            x_b = self.conv_b1(x_b, subgraph_edge)
-            x_b = self.conv_b2(x_b, subgraph_edge)
-            x_b = self.batch_norm_b(x_b)
-
+            x_b = self.conv_b(x_b, subgraph_edge)
+        # x_a = self.conv(x_a, data.edge_index)
+        # x_a = self.batch_norm(x_a)
+        # x_f = self.batch_norm_f(x_f)
+        # x_b = self.batch_norm_b(x_b)
         x = torch.concat((x_f, x_b), 1)
-        # print(x_f.shape, x_b.shape)
-        x = self.lin(x)
+        x = self.lin2(x)
         return x
 
 
@@ -63,23 +64,28 @@ class BiGCNModel(torch.nn.Module):
         num_encoder_out_features=8,
         pooling=None,
         breaks=None,
+        **kwargs
     ):
         super(BiGCNModel, self).__init__()
         self.device = device
         self.breaks = breaks
-        self.encoder = BiGCNEncoder(num_encoder_in_features, num_encoder_out_features)
-        self.lin1 = Linear(num_encoder_out_features, num_encoder_out_features // 2)
-        self.lin2 = Linear(num_encoder_out_features // 2, 1)
+        self.encoder = BiGCNEncoder(
+            self.breaks, self.device, num_encoder_in_features, num_encoder_out_features
+        )
+        self.lin1 = Linear(num_encoder_out_features, 1)
+        # self.lin2 = Linear(8, 1)
         self.pool = None
+        self.pool_kwargs = {}
         if pooling == "windowed_sum":
             self.pool = windowed_sum_pooling
+            self.pool_kwargs = {"breaks": kwargs.get("out_breaks")}
 
     def forward(self, data):
         # node embeddings num_nodes x num_encoder_out_features
         x = self.encoder(data)
-        h = self.lin1(x)
         # pooledI embeddings num_windows x num_encoder_out_features//2
         if self.pool is not None:
-            h = self.pool(h, data, self.device, breaks=self.breaks)
-        out = self.lin2(h)
+            x = self.pool(x, data, self.device, **self.pool_kwargs)
+        out = self.lin1(x)
+        # out = self.lin2(out)
         return out

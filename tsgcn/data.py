@@ -86,6 +86,26 @@ def windowed_div_from_ts(ts, num_windows=100):
     return torch.FloatTensor(div)
 
 
+def get_node_features(ts):
+    num_child = np.zeros(ts.num_nodes)
+    num_samples = np.zeros(ts.num_nodes)
+    trees = np.zeros(ts.num_nodes)
+    for tree in ts.trees():
+        for node in tree.nodes():
+            num_child[node] += tree.num_children(node)
+            num_samples[node] += tree.num_samples(node)
+            trees[node] += 1
+    num_child = num_child / trees
+    num_samples = num_samples / trees
+    norm_node_features = (
+        num_samples  # num_samples  # np.column_stack([num_child, num_samples])
+    )
+    norm_node_features = (
+        norm_node_features - np.mean(norm_node_features, axis=0)
+    ) / np.std(norm_node_features, axis=0)
+    return torch.FloatTensor(norm_node_features)
+
+
 def _compute_y(i, dt, y_func, y_name, **kwargs):
     seed = dt.seeds[i]
     raw_file_name = f"{dt.raw_root}sim_{seed}.trees"

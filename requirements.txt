@@ -18,3 +18,5 @@ pytorch-sparse
 networkx
 ipywidgets
 gpustat
+torchvision
+torchview

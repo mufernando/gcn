@@ -40,7 +40,7 @@ def convert_tseq(ts):
         np.diff(np.unique(edge_idx.flatten())) == 1
     )  # there are no gaps in node ids
     for node in ts.nodes():
-        node_features.append([node.time])
+        node_features.append([node.time, 0])
     node_features = torch.FloatTensor(node_features)
     return edge_idx, edge_interval, node_features, ts.sequence_length
 

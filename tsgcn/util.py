@@ -1,6 +1,9 @@
 import torch
 import gpustat
 import numpy as np
+from torch_geometric.utils import degree
+import torch.nn.functional as F
+
 
 
 def get_idle_gpu():
@@ -25,6 +28,22 @@ def get_idle_gpu():
         pass
 
 
+def onehot_population_encoding(tree_sequence, tips_only=True):
+    nodes = tree_sequence.tables.nodes
+    out = torch.zeros(
+        tree_sequence.num_nodes,
+        tree_sequence.num_populations,
+    )
+    if tips_only:
+        samples = [i for i in tree_sequence.samples()]
+    else:
+        samples = [i for i in range(tree_sequence.num_nodes)]
+    out[samples, :] = F.one_hot(
+        torch.from_numpy(nodes.population[samples].astype(int)),
+        tree_sequence.num_populations,
+    ).type(torch.float32)
+    return out
+
 def convert_tseq(ts):
     """
     Converts a tree sequence into a tuple with three tensors: `edge_idx` (2, num_edges),
@@ -33,16 +52,26 @@ def convert_tseq(ts):
     The `node_features` tensor only contains the node times.
     """
     edges = ts.tables.edges
+    nodes = ts.tables.nodes
+
+    edge_span = edges.right - edges.left
+    edge_length = nodes.time[edges.parent] - nodes.time[edges.child]
+    span_normalize = [np.mean(edge_span), np.std(edge_span)]
+    length_normalize = [np.mean(edge_length), np.std(edge_length)]
+
+    edge_span = (edge_span - span_normalize[0]) / span_normalize[1]
+    edge_span = torch.from_numpy(edge_span).type(torch.float32)
+    edge_length = (edge_length - length_normalize[0]) / length_normalize[
+        1
+    ]
+    edge_length = torch.from_numpy(edge_length).type(torch.float32)
+    edge_features = torch.column_stack([edge_span, edge_length])
     edge_idx = torch.LongTensor(np.row_stack((edges.parent, edges.child)))
-    edge_interval = torch.FloatTensor(np.row_stack((edges.left, edges.right)))
-    node_features = []
     assert np.all(
         np.diff(np.unique(edge_idx.flatten())) == 1
     )  # there are no gaps in node ids
-    for node in ts.nodes():
-        node_features.append([node.time, 0])
-    node_features = torch.FloatTensor(node_features)
-    return edge_idx, edge_interval, node_features, ts.sequence_length
+    node_features = onehot_population_encoding(ts, tips_only=True)
+    return edge_idx, edge_features, node_features, ts.sequence_length
 
 
 def windowed_sum_pooling(x, data, device, breaks=None):
@@ -56,10 +85,28 @@ def windowed_sum_pooling(x, data, device, breaks=None):
     for i in range(len(breaks) - 1):
         left = breaks[i]
         right = breaks[i + 1]
-        nodes_in_window = data.get_subgraph(left, right).flatten()
+        nodes_in_window = torch.unique(data.get_subgraph(left, right).flatten())
         pooled = torch.sum(
             x[nodes_in_window], dim=0
         )  # [0] to get the max values not indices
         x_pooled[i, :] = pooled
         # print(x_pooled,flush=True)
     return x_pooled
+
+def get_degree_histogram(loader):
+    """Returns the degree histogram to be used as input for the :obj:`deg`
+    argument in :class:`PNAConv`."""
+    deg_histogram = torch.zeros(1, dtype=torch.long)
+    for data in loader:
+        deg = degree(data.edge_index[1], num_nodes=data.num_nodes,
+                        dtype=torch.long)
+        deg_bincount = torch.bincount(deg, minlength=deg_histogram.numel())
+        deg_histogram = deg_histogram.to(deg_bincount.device)
+        if deg_bincount.numel() > deg_histogram.numel():
+            deg_bincount[:deg_histogram.size(0)] += deg_histogram
+            deg_histogram = deg_bincount
+        else:
+            assert deg_bincount.numel() == deg_histogram.numel()
+            deg_histogram += deg_bincount
+
+    return deg_histogram

@@ -61,11 +61,11 @@ class TreeSequencesDataset(Dataset):
     def process(self):
         for raw_file_name, i in zip(self.raw_file_names, range(len(self.seeds))):
             ts = tskit.load(raw_file_name)
-            edge_idx, edge_int, node_features, seq_len = convert_tseq(ts)
+            edge_idx, edge_features, node_features, seq_len = convert_tseq(ts)
             data = TreeSequenceData(
                 x=node_features,
                 edge_index=edge_idx,
-                edge_interval=edge_int,
+                edge_attr=edge_features,
                 sequence_length=seq_len,
             )
             torch.save(data, os.path.join(self.processed_dir, f"tseq_{i}.pt"))
@@ -82,28 +82,30 @@ class TreeSequencesDataset(Dataset):
 
 def windowed_div_from_ts(ts, num_windows=100):
     windows = np.linspace(0, ts.sequence_length, num_windows + 1)
-    div = ts.diversity(windows=windows, mode="branch") / ts.diversity(mode="branch")
+    div = ts.diversity(windows=windows, mode="site") / ts.diversity(mode="site")
     return torch.FloatTensor(div)
 
 
 def get_node_features(ts):
-    num_child = np.zeros(ts.num_nodes)
-    num_samples = np.zeros(ts.num_nodes)
+    stat_names = ["depth", "time", "pi"]
+    depth = np.zeros(ts.num_nodes)
+    time = np.zeros(ts.num_nodes)
     trees = np.zeros(ts.num_nodes)
     for tree in ts.trees():
         for node in tree.nodes():
-            num_child[node] += tree.num_children(node)
-            num_samples[node] += tree.num_samples(node)
+            depth[node] += tree.depth(node)
+            time[node] += tree.time(node)
             trees[node] += 1
-    num_child = num_child / trees
-    num_samples = num_samples / trees
-    norm_node_features = (
-        num_samples  # num_samples  # np.column_stack([num_child, num_samples])
-    )
+    # per tree normalization
+    depth = depth / trees
+    time = time / trees
+    pi = ts.diversity(mode="node")
+    # tajd = ts.Tajimas_D(mode="node")
+    norm_node_features = np.column_stack((depth, time, pi))
     norm_node_features = (
         norm_node_features - np.mean(norm_node_features, axis=0)
     ) / np.std(norm_node_features, axis=0)
-    return torch.FloatTensor(norm_node_features)
+    return torch.FloatTensor(norm_node_features), stat_names
 
 
 def _compute_y(i, dt, y_func, y_name, **kwargs):

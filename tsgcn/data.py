@@ -105,7 +105,7 @@ def get_node_features(ts):
     norm_node_features = (
         norm_node_features - np.mean(norm_node_features, axis=0)
     ) / np.std(norm_node_features, axis=0)
-    return torch.FloatTensor(norm_node_features), stat_names
+    return torch.FloatTensor(norm_node_features)
 
 
 def _compute_y(i, dt, y_func, y_name, **kwargs):
